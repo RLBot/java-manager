@@ -1,0 +1,25 @@
+# Intellij IDEA project files
+*.iml
+/.idea
+*.ipr
+*.iws
+
+# Intellij IDEA build output
+/out
+/agents/java_demo/out
+build/
+
+# Gradle
+.gradle
+
+/src/generated
+
+# File with api keys, passwords, etc
+local.properties
+.vs/
+
+# VSCode IDE files.
+**/.vscode/
+
+# This is a crash report used by RLBot binary
+backtrace.dump

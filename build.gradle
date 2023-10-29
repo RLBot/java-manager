@@ -1,0 +1,162 @@
+buildscript {
+    repositories {
+        maven {
+            url "https://plugins.gradle.org/m2/"
+        }
+    }
+    dependencies {
+    }
+}
+
+plugins {
+    id "java-library"
+    id "maven-publish"
+    id "signing"
+}
+
+apply plugin: 'java'  // This is the backbone of the gradle build process, we don't just use it for java files.
+
+repositories {
+    mavenCentral()
+}
+
+sourceCompatibility = '1.8'
+targetCompatibility = '1.8'
+
+def javaDllDir = 'build/dll'
+
+dependencies {
+    implementation group: 'net.java.dev.jna', name: 'jna', version: '4.5.1'  // Allows the java bot manager to communicate with dll
+    implementation group: 'net.java.dev.jna', name: 'jna-platform', version: '4.5.1'  // Allows the java bot manager to communicate with dll
+    implementation 'com.github.davidmoten:flatbuffers-java:1.9.0.1'  // Temporarily using this guy's flatbuffers package because the official one is behind.
+//    compile group: 'javax.websocket', name: 'javax.websocket-api', version: '1.1' // Used for RLBot sockets communication instead of dll
+
+    // This is handy for running the test without needing to supply jna.library.path.
+    testRuntimeOnly files(javaDllDir)
+
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.3.1'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.3.1'
+}
+
+project.setGroup('org.rlbot.commons')
+project.setVersion('2.1.0')
+
+sourceSets {
+    main {
+        java {
+            // This is the default location where java protobuf classes are generated
+            srcDirs = ['src/main/java', 'src/generated']
+        }
+    }
+}
+
+def flatOutputDir = "./src/generated/"
+
+task generateFlatbuffersJava(type: Exec) {
+    def flatbufDir = "./external/flatbuffers/"
+    def flatcExe = flatbufDir + "flatc.exe"
+    def schemaPath = flatbufDir + "rlbot.fbs"
+    commandLine flatcExe, "--java", "-o", flatOutputDir, schemaPath
+}
+
+// You can use the clean task to remove build output.
+clean {
+    // In addition to the normal clean behavior, also remove the generated flatbuffer file(s).
+    delete flatOutputDir
+}
+
+// Establish some task dependencies so that some tasks always run before others.
+compileJava.dependsOn generateFlatbuffersJava
+
+task createJavaDllFolder {
+    mkdir javaDllDir
+}
+
+task javaSetup {
+    dependsOn 'generateFlatbuffersJava'
+    dependsOn 'createJavaDllFolder'
+}
+
+// This task creates a jar file which contains the java source files.
+task sourcesJar(type: Jar, dependsOn: classes) {
+    classifier = 'sources'
+    from sourceSets.main.allSource
+}
+
+task javadocJar(type: Jar) {
+    classifier = 'javadoc'
+    from javadoc
+}
+
+artifacts {
+    archives javadocJar, sourcesJar
+}
+
+// This relies on having some configuration in ~/.gradle/gradle.properties file.
+//signing.keyId
+//signing.password
+//signing.secretKeyRingFile
+// https://docs.gradle.org/current/userguide/signing_plugin.html
+signing {
+    sign publishing.publications
+}
+
+// In order to run the publish task successfully, create a file called local.properties
+// and add a line like maven.password=... (ask tarehart)
+// You'll also need to increment the project.setVersion(...) number in this file to push successfully.
+Properties localProperties = new Properties()
+File propsFile = new File('local.properties')
+if (propsFile.exists()) {
+    localProperties.load(new FileInputStream(propsFile))
+}
+
+// https://central.sonatype.org/publish/publish-gradle/
+// https://dev.to/madhead/no-bullshit-guide-on-publishing-your-gradle-projects-to-maven-central-3ok4
+// After publishing, you need to visit https://s01.oss.sonatype.org/ to actually release it, following
+// the instructions at https://central.sonatype.org/publish/release/
+publishing {
+    publications {
+        Main(MavenPublication) {
+            from components.java
+            artifact sourcesJar
+            artifact javadocJar
+            groupId project.getGroup()
+            artifactId 'framework'
+            version project.getVersion()
+            pom {
+                name = 'RLBot Java Framework'
+                description = 'Supports the creation of custom Rocket League bots.'
+                url = 'https://www.rlbot.org'
+                scm {
+                    connection = 'scm:git:git://github.com/RLBot/RLBot.git'
+                    url = 'https://github.com/RLBot/RLBot/'
+                }
+                developers {
+                    developer {
+                        id = 'tarehart'
+                        name = 'Tyler Arehart'
+                        email = 'tarehart@gmail.com'
+                    }
+                }
+                licenses {
+                    license {
+                        name = 'MIT License'
+                        url = 'https://opensource.org/licenses/MIT'
+                    }
+                }
+            }
+        }
+    }
+    repositories {
+        maven {
+            name = "OSSRH"
+            // URL specified in our onboarding ticket: https://issues.sonatype.org/browse/OSSRH-73323
+            url "https://s01.oss.sonatype.org/service/local/staging/deploy/maven2"
+            credentials {
+                username 'rlbotofficial'
+                // Password is the one associated with this login: https://issues.sonatype.org/login.jsp (ask tarehart)
+                password localProperties.getProperty("maven.password")
+            }
+        }
+    }
+}
